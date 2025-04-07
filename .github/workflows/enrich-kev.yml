@@ -45,4 +45,3 @@ jobs:
           files: ./known_exploited_vulnerabilities_with_cpes.csv
           tag_name: Nightly
           body: "Final Updated at ${{ env.CURRENT_DATETIME }}."
-          draft: true
