@@ -1,0 +1,49 @@
+name: Enrich KEV v2
+
+on:
+  schedule:
+    - cron: '0 1 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  enrich-kev:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Scripts
+        uses: actions/checkout@v4
+      - name: Install Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.13'
+      - name: Install Python Dependencies
+        run: python -m pip install --upgrade pip pandas
+      - name: Install SQLite3
+        run: |
+          sudo apt update
+          sudo apt install sqlite3
+      - name: Fetch KEV
+        run: curl -o ./known_exploited_vulnerabilities.csv https://www.cisa.gov/sites/default/files/csv/known_exploited_vulnerabilities.csv
+      - name: Fetch NVD
+        uses: docker://vuls/go-cve-dictionary:latest
+        with:
+          entrypoint: '/bin/sh'
+          args: '-c "go-cve-dictionary fetch nvd | sleep 15"'
+      - name: 'Extract CPE from NVD'
+        run: sqlite3 ./cve.sqlite3 ".header on" ".mode csv" "select nvds.cve_id, nvd_cpes.uri from nvd_cpes LEFT JOIN nvds ON nvd_cpes.nvd_id = nvds.id;" > ./nvd_cpes.csv
+      - name: 'Extract CVSS3 from NVD'
+        run: sqlite3 ./cve.sqlite3 ".header on" ".mode csv" "select nvds.cve_id, nvd_cvss3.attack_vector, nvd_cvss3.attack_complexity, nvd_cvss3.privileges_required, nvd_cvss3.user_interaction, nvd_cvss3.scope, nvd_cvss3.confidentiality_impact, nvd_cvss3.integrity_impact, nvd_cvss3.availability_impact, nvd_cvss3.base_score, nvd_cvss3.base_severity, nvd_cvss3.exploitability_score, nvd_cvss3.impact_score from nvds LEFT JOIN nvd_cvss3 ON nvds.id = nvd_cvss3.nvd_id;" > ./nvd_cvss3.csv
+      - name: Merge KEV with CPE
+        run: python ./kev_enricher2.py
+      - name: Set ENV
+        env:
+          TZ: Asia/Tokyo
+        run: echo "CURRENT_DATETIME=$(date +'%Y-%m-%d %H:%M:%S')" >> $GITHUB_ENV
+      - name: Release Enriched KEV
+        uses: softprops/action-gh-release@v2
+        with:
+          files: ./known_exploited_vulnerabilities_with_cpes_cvss.csv
+          tag_name: Nightly
+          body: "Final Updated at ${{ env.CURRENT_DATETIME }}."
